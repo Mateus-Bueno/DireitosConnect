@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  <div class="chat-container">
+
+    <!-- Botão ☰ -->
+    <div class="sidebar-toggle-container">
+      <button class="toggle-button" onclick="document.getElementById('sidebar').classList.toggle('hidden-sidebar')">☰</button>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <h4>Conversas</h4>
+      <div class="conversation">Conversa 1</div>
+      <div class="conversation">Conversa 2</div>
+      <div class="conversation">Conversa 3</div>
+      <div class="conversation">Conversa 4</div>
+    </div>
+
+    <!-- Área do chat -->
+    <div class="chat-main">
+      <div class="chat-box">
+        <div class="message bot">Olá! Sou a IA da Direitors Connect e estou aqui para ajudar!</div>
+        <div class="message bot">Qual seria a sua dúvida hoje?</div>
+      </div>
+      <div class="message-input">
+        <form class="d-flex">
+          <input type="text" class="form-control me-2" placeholder="Digite sua mensagem...">
+          <button class="btn btn-primary" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

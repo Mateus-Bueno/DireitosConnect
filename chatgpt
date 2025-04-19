@@ -1,0 +1,26 @@
+load_dotenv()
+
+# Obtém a chave de API diretamente do ambiente ou do arquivo .env
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+@app.route('/chatgpt', methods=['POST'])
+def chatgpt():
+    mensagem = request.form.get('mensagem')
+
+    try:
+        # Verifique se a chave foi carregada corretamente
+        if not openai.api_key:
+            return jsonify({'erro': 'Chave de API não configurada corretamente'})
+
+        # Use a função openai.ChatCompletion.create diretamente
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # 
+            messages=[
+                {"role": "system", "content": "Você é um assistente jurídico inteligente e prestativo."},
+                {"role": "user", "content": mensagem}
+            ]
+        )
+        resposta = response.choices[0].message['content'].strip()  # Acesse a resposta do modelo
+        return jsonify({'resposta': resposta})
+    except Exception as e:
+        return jsonify({'erro': str(e)})
