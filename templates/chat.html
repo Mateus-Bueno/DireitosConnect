@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  <div class="chat-container">
+
+    <!-- Botão ☰ -->
+    <div class="sidebar-toggle-container">
+      <button class="toggle-button" onclick="document.getElementById('sidebar').classList.toggle('hidden-sidebar')">☰</button>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <h4>Conversas</h4>
+      <div class="conversation">Jhonatan</div>
+      <div class="conversation">Ana</div>
+      <div class="conversation">Mateus</div>
+      <div class="conversation">Conversa 4</div>
+    </div>
+
+    <!-- Área do chat -->
+    <div class="chat-main">
+      <div class="chat-box" id="chat-box">
+      </div>
+      <button id="scroll-bottom-btn" class="scroll-bottom-btn" onclick="scrollToBottom()" aria-label="Ir para o final do chat">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
+          <path d="M12 16.5l-6-6 1.41-1.41L12 13.67l4.59-4.58L18 10.5l-6 6z"/>
+        </svg>
+      </button>
+      <div class="message-input">
+        <form id="chat-form" class="d-flex">
+          <textarea
+            id="mensagem"
+            class="form-control me-2"
+            rows="1"
+            placeholder="Digite sua mensagem..."
+            required
+            oninput="autoResize(this)"
+          ></textarea>
+          <button class="btn btn-primary" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script de auto-resize da textarea -->
+  <script>
+    function autoResize(textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = textarea.scrollHeight + 'px';
+    }
+  </script>
+
+  <!-- Script principal do chat -->
+  <script src="{{ url_for('static', filename='script/chat.js') }}"></script>
+</body>
+</html>
