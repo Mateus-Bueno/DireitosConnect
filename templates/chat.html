@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Chat</title>
+  <title>Chat com Lia</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
@@ -21,17 +21,19 @@
       <div class="conversation">Ana</div>
       <div class="conversation">Mateus</div>
       <div class="conversation">Conversa 4</div>
+      <button class="newConversation-btn">Novo Chat</button>
     </div>
 
-    <!-- Área do chat -->
+    <!-- Chat principal -->
     <div class="chat-main">
-      <div class="chat-box" id="chat-box">
-      </div>
+      <div class="chat-box" id="chat-box"></div>
+
       <button id="scroll-bottom-btn" class="scroll-bottom-btn" onclick="scrollToBottom()" aria-label="Ir para o final do chat">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
           <path d="M12 16.5l-6-6 1.41-1.41L12 13.67l4.59-4.58L18 10.5l-6 6z"/>
         </svg>
       </button>
+
       <div class="message-input">
         <form id="chat-form" class="d-flex">
           <textarea
@@ -48,15 +50,6 @@
     </div>
   </div>
 
-  <!-- Script de auto-resize da textarea -->
-  <script>
-    function autoResize(textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = textarea.scrollHeight + 'px';
-    }
-  </script>
-
-  <!-- Script principal do chat -->
   <script src="{{ url_for('static', filename='script/chat.js') }}"></script>
 </body>
 </html>
