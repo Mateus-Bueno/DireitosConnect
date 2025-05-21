@@ -1,60 +1,103 @@
 import os
 import time
-
-from flask import Flask, request, render_template, redirect, url_for, session, jsonify
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_mysqldb import MySQL
+from dotenv import load_dotenv
+from openai import OpenAI
 import MySQLdb.cursors
 import bcrypt
-from dotenv import load_dotenv
 
-from openai import OpenAI  # só precisamos desta classe
-
-# Carrega variáveis do arquivo .env
+# Carrega variáveis do .env
 load_dotenv(dotenv_path='/home/DireitosConnect/mysite/.env')
 
-# Instancia o client usando a chave correta do .env
+# Configurações OpenAI
 client = OpenAI(api_key=os.getenv('openai_key'))
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'Direito')
 
-# Configuração do banco de dados
-app.config['MYSQL_HOST']     = os.getenv('MYSQL_HOST', 'DireitosConnect.mysql.pythonanywhere-services.com')
-app.config['MYSQL_USER']     = os.getenv('MYSQL_USER', 'DireitosConnect')
+# Configuração do banco de dados MySQL
+app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST', 'DireitosConnect.mysql.pythonanywhere-services.com')
+app.config['MYSQL_USER'] = os.getenv('MYSQL_USER', 'DireitosConnect')
 app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD', 'IFSP2025')
-app.config['MYSQL_DB']       = os.getenv('MYSQL_DB', 'DireitosConnect$default')
+app.config['MYSQL_DB'] = os.getenv('MYSQL_DB', 'DireitosConnect$default')
 
 mysql = MySQL(app)
 
+def gerar_csv_advogados():
+    try:
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute("SELECT especialidade, nome, telefone, horario_trabalho FROM advogados")
+        dados = cursor.fetchall()
+
+        # Cabeçalho
+        csv_linhas = ["Especialidade,Nome,Telefone,Horário de Trabalho"]
+
+        # Cada linha do CSV
+        for linha in dados:
+            csv_linhas.append(f"{linha['especialidade']},{linha['nome']},{linha['telefone']},{linha['horario_trabalho']}")
+
+        return "\n".join(csv_linhas)
+    except Exception as e:
+        print("Erro ao gerar CSV:", e)
+        return ""
+
+
 def obter_resposta_openai(texto):
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
+        session.pop('chat_history', None)
+        if 'chat_history' not in session:
+
+            csv_advogados = gerar_csv_advogados()
+
+            prompt_Lia = f"""
+                Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é ajudar os clientes a compreenderem,
+                de forma objetiva e acessível, dúvidas relacionadas a situações jurídicas que tenham enfrentado recentemente.
+
+                Sempre que possível, identifique claramente qual é a área do direito relacionada ao problema apresentado
+                (como direito civil, penal, trabalhista, tributário, entre outros) e informe essa área de forma explícita na resposta.
+                Caso não seja possível definir com segurança a área jurídica, solicite mais detalhes ao cliente antes de tentar indicar.
+
+                Apresente-se no início da sua primeira resposta. Use linguagem simples, sem termos jurídicos rebuscados.
+                Quando for necessário usar algum termo técnico, explique-o de forma clara para garantir que qualquer pessoa, mesmo sem formação jurídica, possa entender.
+
+                Evite suposições ou invenções. Baseie suas respostas apenas nas informações fornecidas pelo usuário e no seu conhecimento geral.
+                Se faltar informação, peça mais detalhes em vez de presumir ou imaginar contextos.
+
+                Seu tom deve ser acessível e empático, mas sempre profissional. Não ofereça conclusões legais definitivas — seu papel é orientar e esclarecer,
+                não substituir a análise de um advogado.
+
+                Quando for possível identificar a área de atuação do problema, você deve recomendar um advogado com a
+                especialidade relacionada, montando um "cartão de visitas" com as informações do seguinte CSV:
+
+                {csv_advogados}
+
+                Se o usuário continuar buscando informações após a primeira indicação, não mencione a recomendação novamente a menos que explicitamente solicitado ou que seja um problema diferente.
+
+            """
+
+            session['chat_history'] = [
                 {
                     "role": "system",
-                    "content": """
-                                Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é esclarecer possíveis
-                                dúvidas dos clientes com relação a qualquer problema que tenham enfrentado recentemente, além de identificar
-                                qual a área de especialização que mais se adeque a esse problema. Se apresente no início de sua primeira resposta
-                                e, às entradas que tragam alguma dúvida jurídica nova, sempre indique explicitamente a área de especialização.
-                                Caso não seja possível definir a área de atuação a partir de apenas uma interação, peça por mais detalhes.
-
-                                Suas respostas sempre devem evitar termos rebuscados da área de direito, ou explicar claramente o significado destes
-                                quando necessário, isso visando possibilitar maior acessibilidade na conversa. Tente sempre falar de forma casual, porém
-                                mantendo o profissionalismo, de forma a dar maior credibilidade ao que esta sendo discutido.
-                               """
-                },
-                {"role": "user", "content": texto}
+                    "content": prompt_Lia
+                }
             ]
-        )
-        return completion.choices[0].message.content
 
+        session['chat_history'].append({"role": "user", "content": texto})
+
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=session['chat_history']
+        )
+
+        resposta = completion.choices[0].message.content
+        session['chat_history'].append({"role": "assistant", "content": resposta})
+
+        return resposta
     except Exception as e:
-        # captura qualquer erro (incluindo rate limits)
-        print("Erro ao chamar OpenAI:", e)
+        print("Erro OpenAI:", e)
         time.sleep(60)
-        return obter_resposta_openai(texto)
+        return "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente mais tarde."
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -118,21 +161,24 @@ def cadastro():
 def chat():
     return render_template('chat.html')
 
-@app.route('/api/chat', methods=['POST'])
-def api_chat():
-    data  = request.get_json()
-    texto = data.get('message', '')
-    reply = obter_resposta_openai(texto)
-    return jsonify(reply=reply)
-
 @app.route('/logout')
 def logout():
     session.pop('usuario', None)
+    session.pop('chat_history', None)  # limpa o histórico da conversa
     return redirect(url_for('login'))
 
 @app.route('/perfil')
 def perfil():
     return render_template('perfil.html')
 
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    data = request.get_json()
+    texto = data.get('message', '')
+
+    resposta_openai = obter_resposta_openai(texto)
+
+    return jsonify(reply=resposta_openai)
+
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
