@@ -10,13 +10,13 @@ import bcrypt
 # Carrega variáveis do .env
 load_dotenv(dotenv_path='/home/DireitosConnect/mysite/.env')
 
-# Configurações OpenAI
+# Configuração da OpenAI
 client = OpenAI(api_key=os.getenv('openai_key'))
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'Direito')
 
-# Configuração do banco de dados MySQL
+# Configuração do MySQL
 app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST', 'DireitosConnect.mysql.pythonanywhere-services.com')
 app.config['MYSQL_USER'] = os.getenv('MYSQL_USER', 'DireitosConnect')
 app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD', 'IFSP2025')
@@ -29,59 +29,62 @@ def gerar_csv_advogados():
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute("SELECT especialidade, nome, telefone, horario_trabalho FROM advogados")
         dados = cursor.fetchall()
-
-        # Cabeçalho
-        csv_linhas = ["Especialidade,Nome,Telefone,Horário de Trabalho"]
-
-        # Cada linha do CSV
-        for linha in dados:
-            csv_linhas.append(f"{linha['especialidade']},{linha['nome']},{linha['telefone']},{linha['horario_trabalho']}")
-
-        return "\n".join(csv_linhas)
+        linhas = ["Especialidade,Nome,Telefone,Horário de Trabalho"]
+        for row in dados:
+            linhas.append(f"{row['especialidade']},{row['nome']},{row['telefone']},{row['horario_trabalho']}")
+        return "\n".join(linhas)
     except Exception as e:
         print("Erro ao gerar CSV:", e)
         return ""
 
-
-def obter_resposta_openai(texto):
+def obter_resposta_openai(texto, chat_id=None):
     try:
-        session.pop('chat_history', None)
         if 'chat_history' not in session:
-
+            session['chat_history'] = []
+            
             csv_advogados = gerar_csv_advogados()
+            prompt = f"""
+            Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é ajudar os clientes a compreenderem,
+            de forma objetiva e acessível, dúvidas relacionadas a situações jurídicas que tenham enfrentado recentemente.
 
-            prompt_Lia = f"""
-                Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é ajudar os clientes a compreenderem,
-                de forma objetiva e acessível, dúvidas relacionadas a situações jurídicas que tenham enfrentado recentemente.
+            Sempre que possível, identifique claramente qual é a área do direito relacionada ao problema apresentado
+            (como direito civil, penal, trabalhista, tributário, entre outros) e informe essa área de forma explícita na resposta.
+            Caso não seja possível definir com segurança a área jurídica, solicite mais detalhes ao cliente antes de tentar indicar.
 
-                Sempre que possível, identifique claramente qual é a área do direito relacionada ao problema apresentado
-                (como direito civil, penal, trabalhista, tributário, entre outros) e informe essa área de forma explícita na resposta.
-                Caso não seja possível definir com segurança a área jurídica, solicite mais detalhes ao cliente antes de tentar indicar.
+            Apresente-se no início da sua primeira resposta. Use linguagem simples; construa suas respostas em uma estrutura de até 4 parágrafos; e evite utilizar termos jurídicos rebuscados.
+            Quando for necessário usar algum termo técnico, explique-o de forma clara para garantir que qualquer pessoa, mesmo sem formação jurídica, possa entender.
 
-                Apresente-se no início da sua primeira resposta. Use linguagem simples, sem termos jurídicos rebuscados.
-                Quando for necessário usar algum termo técnico, explique-o de forma clara para garantir que qualquer pessoa, mesmo sem formação jurídica, possa entender.
+            Evite suposições ou invenções. Baseie suas respostas apenas nas informações fornecidas pelo usuário e no seu conhecimento geral.
+            Se faltar informação, peça mais detalhes em vez de presumir ou imaginar contextos.
 
-                Evite suposições ou invenções. Baseie suas respostas apenas nas informações fornecidas pelo usuário e no seu conhecimento geral.
-                Se faltar informação, peça mais detalhes em vez de presumir ou imaginar contextos.
+            Seu tom deve ser acessível e empático, mas sempre profissional. Não ofereça conclusões legais definitivas — seu papel é orientar e esclarecer,
+            não substituir a análise de um advogado.
 
-                Seu tom deve ser acessível e empático, mas sempre profissional. Não ofereça conclusões legais definitivas — seu papel é orientar e esclarecer,
-                não substituir a análise de um advogado.
+            Quando for possível identificar a área de atuação do problema, adicionalmente você deve recomendar um advogado com a
+            especialidade relacionada caso exista, montando um "cartão de visitas" com as informações do seguinte CSV:
 
-                Quando for possível identificar a área de atuação do problema, você deve recomendar um advogado com a
-                especialidade relacionada, montando um "cartão de visitas" com as informações do seguinte CSV:
-
-                {csv_advogados}
-
-                Se o usuário continuar buscando informações após a primeira indicação, não mencione a recomendação novamente a menos que explicitamente solicitado ou que seja um problema diferente.
-
+            {csv_advogados}
             """
 
-            session['chat_history'] = [
-                {
-                    "role": "system",
-                    "content": prompt_Lia
-                }
-            ]
+            if chat_id:
+                # Carrega histórico de mensagens do banco
+                cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em",
+                    (chat_id,)
+                )
+                mensagens = cursor.fetchall()
+
+                for m in mensagens:
+                    session['chat_history'].append({
+                        "role": "user" if m['remetente'].strip().lower() == "usuario" else "assistant",
+                        "content": m['conteudo']
+                    })
+
+                session['chat_history'].insert(0, {"role": "system", "content": prompt})
+
+            else:
+                session['chat_history'].insert(0, {"role": "system", "content": prompt})
 
         session['chat_history'].append({"role": "user", "content": texto})
 
@@ -93,11 +96,21 @@ def obter_resposta_openai(texto):
         resposta = completion.choices[0].message.content
         session['chat_history'].append({"role": "assistant", "content": resposta})
 
+        if chat_id:
+            cursor = mysql.connection.cursor()
+            cursor.execute("INSERT INTO mensagens (chat_id, remetente, conteudo) VALUES (%s, %s, %s)",
+                           (chat_id, 'usuario', texto))
+            cursor.execute("INSERT INTO mensagens (chat_id, remetente, conteudo) VALUES (%s, %s, %s)",
+                           (chat_id, 'ia', resposta))
+            mysql.connection.commit()
+
         return resposta
+
     except Exception as e:
         print("Erro OpenAI:", e)
-        time.sleep(60)
+        time.sleep(10)
         return "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente mais tarde."
+
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -159,12 +172,58 @@ def cadastro():
 
 @app.route('/chat')
 def chat():
-    return render_template('chat.html')
+    if 'usuario' not in session:
+        return redirect(url_for('login'))
+
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (session['usuario'],))
+    user = cursor.fetchone()
+
+    cursor.execute("SELECT id, titulo FROM chats WHERE usuario_id = %s ORDER BY criado_em DESC", (user['id'],))
+    chats = cursor.fetchall()
+
+    return render_template('chat.html', chats=chats, mensagens=[])
+
+@app.route('/chat/<int:chat_id>')
+def abrir_chat(chat_id):
+    if 'usuario' not in session:
+        return redirect(url_for('login'))
+
+    session.pop('chat_history', None)
+    session['chat_id'] = chat_id
+
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cursor.execute("SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em", (chat_id,))
+    mensagens = cursor.fetchall()
+
+    cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (session['usuario'],))
+    user = cursor.fetchone()
+    cursor.execute("SELECT id, titulo FROM chats WHERE usuario_id = %s ORDER BY criado_em DESC", (user['id'],))
+    chats = cursor.fetchall()
+
+    return render_template('chat.html', mensagens=mensagens, chats=chats)
+
+@app.route('/chat/novo', methods=['POST'])
+def novo_chat():
+    if 'usuario' not in session:
+        return redirect(url_for('login'))
+
+    titulo = request.form.get('titulo', 'Novo Chat')
+
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+    cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (session['usuario'],))
+    user = cursor.fetchone()
+
+    cursor.execute("INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)", (user['id'], titulo))
+    mysql.connection.commit()
+
+    return redirect(url_for('chat'))
 
 @app.route('/logout')
 def logout():
     session.pop('usuario', None)
-    session.pop('chat_history', None)  # limpa o histórico da conversa
+    session.pop('chat_history', None)
+    session.pop('chat_id', None)
     return redirect(url_for('login'))
 
 @app.route('/perfil')
@@ -175,9 +234,9 @@ def perfil():
 def api_chat():
     data = request.get_json()
     texto = data.get('message', '')
+    chat_id = session.get('chat_id', None)
 
-    resposta_openai = obter_resposta_openai(texto)
-
+    resposta_openai = obter_resposta_openai(texto, chat_id)
     return jsonify(reply=resposta_openai)
 
 if __name__ == '__main__':

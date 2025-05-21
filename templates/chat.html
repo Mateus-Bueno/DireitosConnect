@@ -17,16 +17,31 @@
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
       <h4>Conversas</h4>
-      <div class="conversation">Jhonatan</div>
-      <div class="conversation">Ana</div>
-      <div class="conversation">Mateus</div>
-      <div class="conversation">Conversa 4</div>
-      <button class="newConversation-btn">Novo Chat</button>
+      {% if chats %}
+        {% for chat in chats %}
+            <a href="{{ url_for('abrir_chat', chat_id=chat.id) }}" class="conversation">{{ chat.titulo }}</a>
+        {% endfor %}
+      {% else %}
+        <p>Você ainda não tem conversas.</p>
+      {% endif %}
+      <form action="{{ url_for('novo_chat') }}" method="post" class="d-flex flex-column">
+        <input type="text" name="titulo" placeholder="Título do novo chat" class="form-control mb-2" required>
+        <button class="newConversation-btn" type="submit">Novo Chat</button>
+      </form>
     </div>
 
     <!-- Chat principal -->
     <div class="chat-main">
-      <div class="chat-box" id="chat-box"></div>
+        <div class="chat-box" id="chat-box">
+            {% for msg in mensagens %}
+            {% set remetente = msg.remetente.strip().lower() %}
+            {% if remetente == 'usuario' %}
+                <div class="message user">{{ msg.conteudo.strip() | safe }}</div>
+            {% elif remetente == 'ia' %}
+                <div class="message bot">{{ msg.conteudo.strip() | safe }}</div>
+            {% endif %}
+          {% endfor %}
+        </div>
 
       <button id="scroll-bottom-btn" class="scroll-bottom-btn" onclick="scrollToBottom()" aria-label="Ir para o final do chat">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
