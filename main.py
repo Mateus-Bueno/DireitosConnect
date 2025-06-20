@@ -17,10 +17,10 @@ app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'Direito')
 
 # Configuração do MySQL
-app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST', 'DireitosConnect.mysql.pythonanywhere-services.com')
-app.config['MYSQL_USER'] = os.getenv('MYSQL_USER', 'DireitosConnect')
-app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD', 'IFSP2025')
-app.config['MYSQL_DB'] = os.getenv('MYSQL_DB', 'DireitosConnect$default')
+app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST')
+app.config['MYSQL_USER'] = os.getenv('MYSQL_USER')
+app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD')
+app.config['MYSQL_DB'] = os.getenv('MYSQL_DB')
 
 mysql = MySQL(app)
 
@@ -37,11 +37,22 @@ def gerar_csv_advogados():
         print("Erro ao gerar CSV:", e)
         return ""
 
+def identificar_area_juridica(resposta):
+    areas = [
+        'Direito Penal', 'Direito Civil', 'Direito Trabalhista',
+        'Direito do Consumidor', 'Direito Tributário', 'Direito de Família',
+        'Direito Previdenciário', 'Direito Ambiental'
+    ]
+    for area in areas:
+        if area.lower() in resposta.lower():
+            return area
+    return None
+
 def obter_resposta_openai(texto, chat_id=None):
     try:
         if 'chat_history' not in session:
             session['chat_history'] = []
-            
+
             csv_advogados = gerar_csv_advogados()
             prompt = f"""
             Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é ajudar os clientes a compreenderem,
@@ -66,8 +77,8 @@ def obter_resposta_openai(texto, chat_id=None):
             {csv_advogados}
             """
 
+            # Carrega histórico, se houver
             if chat_id:
-                # Carrega histórico de mensagens do banco
                 cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
                 cursor.execute(
                     "SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em",
@@ -81,11 +92,9 @@ def obter_resposta_openai(texto, chat_id=None):
                         "content": m['conteudo']
                     })
 
-                session['chat_history'].insert(0, {"role": "system", "content": prompt})
+            session['chat_history'].insert(0, {"role": "system", "content": prompt})
 
-            else:
-                session['chat_history'].insert(0, {"role": "system", "content": prompt})
-
+        # Adiciona nova pergunta
         session['chat_history'].append({"role": "user", "content": texto})
 
         completion = client.chat.completions.create(
@@ -96,6 +105,7 @@ def obter_resposta_openai(texto, chat_id=None):
         resposta = completion.choices[0].message.content
         session['chat_history'].append({"role": "assistant", "content": resposta})
 
+        # Salva no banco se for chat persistente
         if chat_id:
             cursor = mysql.connection.cursor()
             cursor.execute("INSERT INTO mensagens (chat_id, remetente, conteudo) VALUES (%s, %s, %s)",
@@ -103,6 +113,7 @@ def obter_resposta_openai(texto, chat_id=None):
             cursor.execute("INSERT INTO mensagens (chat_id, remetente, conteudo) VALUES (%s, %s, %s)",
                            (chat_id, 'ia', resposta))
             mysql.connection.commit()
+            cursor.close()
 
         return resposta
 
@@ -110,6 +121,7 @@ def obter_resposta_openai(texto, chat_id=None):
         print("Erro OpenAI:", e)
         time.sleep(10)
         return "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente mais tarde."
+
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -175,6 +187,8 @@ def chat():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
+    session.pop('chat_id', None)  # limpa qualquer chat antigo
+
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
     cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (session['usuario'],))
     user = cursor.fetchone()
@@ -182,26 +196,34 @@ def chat():
     cursor.execute("SELECT id, titulo FROM chats WHERE usuario_id = %s ORDER BY criado_em DESC", (user['id'],))
     chats = cursor.fetchall()
 
-    return render_template('chat.html', chats=chats, mensagens=[])
+    return render_template('chat.html', chats=chats, mensagens=[], chat_id=None)
+
+
+
 
 @app.route('/chat/<int:chat_id>')
 def abrir_chat(chat_id):
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    session.pop('chat_history', None)
     session['chat_id'] = chat_id
+    session.pop('chat_history', None)
 
     cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+    # Mensagens do chat atual
     cursor.execute("SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em", (chat_id,))
     mensagens = cursor.fetchall()
 
+    # Chats do usuário
     cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (session['usuario'],))
     user = cursor.fetchone()
     cursor.execute("SELECT id, titulo FROM chats WHERE usuario_id = %s ORDER BY criado_em DESC", (user['id'],))
     chats = cursor.fetchall()
 
-    return render_template('chat.html', mensagens=mensagens, chats=chats)
+    return render_template('chat.html', mensagens=mensagens, chats=chats, chat_id=chat_id)
+
+
 
 @app.route('/chat/novo', methods=['POST'])
 def novo_chat():
@@ -219,6 +241,45 @@ def novo_chat():
 
     return redirect(url_for('chat'))
 
+
+@app.route('/delete_chat', methods=['POST'])
+def delete_chat():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+
+    if not chat_id:
+        return jsonify({'error': 'ID inválido'}), 400
+
+    cur = mysql.connection.cursor()
+
+    # Deleta mensagens associadas
+    cur.execute("DELETE FROM mensagens WHERE chat_id = %s", (chat_id,))
+    # Deleta o próprio chat
+    cur.execute("DELETE FROM chats WHERE id = %s", (chat_id,))
+
+    mysql.connection.commit()
+    cur.close()
+
+    return jsonify({'success': True})
+
+@app.route('/edit_chat_title', methods=['POST'])
+def edit_chat_title():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    new_title = data.get('new_title')
+
+    if not chat_id or not new_title:
+        return jsonify({'error': 'Dados inválidos'}), 400
+
+    cur = mysql.connection.cursor()
+    cur.execute("UPDATE chats SET titulo = %s WHERE id = %s", (new_title, chat_id))
+    mysql.connection.commit()
+    cur.close()
+
+    return jsonify({'success': True})
+
+
+
 @app.route('/logout')
 def logout():
     session.pop('usuario', None)
@@ -234,10 +295,34 @@ def perfil():
 def api_chat():
     data = request.get_json()
     texto = data.get('message', '')
-    chat_id = session.get('chat_id', None)
+    chat_id = data.get('chat_id')
+    usuario = session.get('usuario')
+
+    if not texto or not usuario:
+        return jsonify({'error': 'Dados incompletos'}), 400
+
+    cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+    # Cria chat se não houver
+    if not chat_id:
+        cursor.execute("SELECT id FROM usuarios WHERE usuario = %s", (usuario,))
+        user = cursor.fetchone()
+        cursor.execute("INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)", (user['id'], 'Nova conversa'))
+        mysql.connection.commit()
+        chat_id = cursor.lastrowid
+        session['chat_id'] = chat_id
 
     resposta_openai = obter_resposta_openai(texto, chat_id)
-    return jsonify(reply=resposta_openai)
+
+    # Atualiza título se detectar área
+    area = identificar_area_juridica(resposta_openai)
+    if area:
+        cursor.execute("UPDATE chats SET titulo = %s WHERE id = %s", (area, chat_id))
+        mysql.connection.commit()
+
+    return jsonify(reply=resposta_openai, chat_id=chat_id)
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

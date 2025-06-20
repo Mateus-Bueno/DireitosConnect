@@ -164,7 +164,6 @@ input.form-control:focus {
 /* CONVERSAS */
 .conversation {
   width: 100%;
-  text-align: center;
   padding: 0.6rem 0.8rem;
   margin-bottom: 8px;
   border-radius: var(--borda-radius);
@@ -173,13 +172,44 @@ input.form-control:focus {
   color: white;
   font-size: 1rem;
   cursor: pointer;
-  text-decoration: none; /* remove sublinhado */
-  display: block;
+  text-decoration: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
+
 
 .conversation:hover {
   background-color: var(--vermelho-principal);
 }
+
+.conversation:hover .edit-icon {
+  opacity: 1;
+}
+
+.edit-icon {
+  font-size: 14px;
+  margin-left: 10px;
+  color: #ffcc99;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  cursor: pointer;
+}
+
+.chat-title-input {
+  flex: 1;
+  font-size: 1rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: none;
+  outline: none;
+  background-color: var(--vermelho-principal);
+  color: white;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+
 
 /* ÁREA PRINCIPAL DO CHAT */
 .chat-main {
@@ -319,4 +349,22 @@ textarea.form-control {
     cursor: pointer;
 }
 
+.conversation-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.delete-chat-btn {
+  background: transparent;
+  border: none;
+  color: #ff6666;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.delete-chat-btn:hover {
+  color: #ff0000;
+}
 
