@@ -3,6 +3,8 @@ const input = document.getElementById('mensagem');
 const chatBox = document.getElementById('chat-box');
 const scrollBtn = document.getElementById('scroll-bottom-btn');
 
+let CHAT_ID = typeof window.CHAT_ID !== 'undefined' ? window.CHAT_ID : null;
+
 function autoResize(textarea) {
   textarea.style.height = 'auto';
   textarea.style.height = textarea.scrollHeight + 'px';
@@ -66,6 +68,11 @@ form.addEventListener('submit', async function (e) {
   userMsg.textContent = texto;
   appendMessage(userMsg);
 
+  const boasVindas = document.getElementById('mensagem-boas-vindas');
+  if (boasVindas) {
+    boasVindas.remove();
+  }
+
   input.value = '';
   input.style.height = 'auto';
   scrollToBottom();
@@ -74,6 +81,9 @@ form.addEventListener('submit', async function (e) {
   botMsg.className = 'message bot';
   appendMessage(botMsg);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
@@ -81,10 +91,41 @@ form.addEventListener('submit', async function (e) {
       body: JSON.stringify({ message: texto, chat_id: CHAT_ID })
     });
 
+    console.log("❌ Erro ao chamar OpenAI:", CHAT_ID)
+
+    if (!resp.ok) {
+      throw new Error(`Erro HTTP ${resp.status}`);
+    }
+
+    const contentType = resp.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      throw new Error("Resposta não é JSON válida");
+    }
+
     const data = await resp.json();
-    typeWriter(botMsg, data.reply, 20);
+
+
+    if (data.chat_id && (CHAT_ID === null || CHAT_ID !== data.chat_id)) {
+      CHAT_ID = data.chat_id;
+
+      const cleanUrl = `/chat/${CHAT_ID}`.replace(/\/+$/, '').replace(/\?$/, '');
+      window.history.replaceState({}, '', cleanUrl);
+    }
+
+    // Adiciona o novo chat à sidebar se ainda não existir
+    if (!document.querySelector(`[data-chat-id="${CHAT_ID}"]`)) {
+      addChatToSidebar(CHAT_ID, data.titulo || "Nova conversa");
+    }
+
+    window.location.href = `/chat/${CHAT_ID}`;
+
+    console.log("❌ Erro ao chamar OpenAI:", CHAT_ID)
+    console.log("❌ Erro ao chamar OpenAI:", texto)
+
+
   } catch (err) {
-    typeWriter(botMsg, 'Desculpe, ocorreu um erro ao obter resposta.', 20);
+      console.error('Erro ao buscar resposta:', err);
+      typeWriter(botMsg, 'Desculpe, ocorreu um erro ao obter resposta.', 20);
   }
 
   scrollToBottom();
@@ -159,3 +200,117 @@ document.querySelectorAll('.edit-icon').forEach(button => {
     input.addEventListener('blur', cancelEdit); // cancela se clicar fora
   });
 });
+
+function addChatToSidebar(chatId, titulo) {
+  const sidebar = document.getElementById('sidebar');
+  const noChatsMsg = document.getElementById('no-chats-msg');
+  if (noChatsMsg) {
+    noChatsMsg.remove();
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'conversation-wrapper';
+
+  const link = document.createElement('a');
+  link.href = `/chat/${chatId}`;
+  link.className = 'conversation';
+  link.setAttribute('data-chat-id', chatId);
+
+  const span = document.createElement('span');
+  span.className = 'chat-title';
+  span.innerText = titulo;
+
+  const editIcon = document.createElement('span');
+  editIcon.className = 'edit-icon';
+  editIcon.setAttribute('data-chat-id', chatId);
+  editIcon.setAttribute('data-current-title', titulo);
+  editIcon.innerText = '✎';
+
+  link.appendChild(span);
+  link.appendChild(editIcon);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'delete-chat-btn';
+  deleteBtn.setAttribute('data-chat-id', chatId);
+  deleteBtn.innerText = '×';
+
+  wrapper.appendChild(link);
+  wrapper.appendChild(deleteBtn);
+
+  sidebar.insertBefore(wrapper, sidebar.querySelector('form'));
+
+  // Reanexa listeners
+  attachChatEventListeners(wrapper);
+}
+
+function attachChatEventListeners(wrapper) {
+  const deleteBtn = wrapper.querySelector('.delete-chat-btn');
+  const editIcon = wrapper.querySelector('.edit-icon');
+
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const chatId = deleteBtn.getAttribute('data-chat-id');
+
+      if (confirm('Tem certeza que deseja excluir este chat?')) {
+        const response = await fetch('/delete_chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId })
+        });
+
+        if (response.ok) {
+          wrapper.remove();
+        } else {
+          alert('Erro ao excluir o chat.');
+        }
+      }
+    });
+  }
+
+  if (editIcon) {
+    editIcon.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const chatId = editIcon.getAttribute('data-chat-id');
+      const chatTitleSpan = editIcon.parentElement.querySelector('.chat-title');
+      const currentTitle = chatTitleSpan.innerText;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentTitle;
+      input.className = 'chat-title-input';
+
+      editIcon.parentElement.replaceChild(input, chatTitleSpan);
+      input.focus();
+
+      const cancelEdit = () => {
+        input.replaceWith(chatTitleSpan);
+      };
+
+      const saveEdit = async () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+          const response = await fetch('/edit_chat_title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, new_title: newTitle })
+          });
+
+          if (response.ok) {
+            chatTitleSpan.innerText = newTitle;
+            editIcon.setAttribute('data-current-title', newTitle);
+          }
+        }
+        input.replaceWith(chatTitleSpan);
+      };
+
+      input.addEventListener('blur', cancelEdit);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') saveEdit();
+        else if (e.key === 'Escape') cancelEdit();
+      });
+    });
+  }
+}

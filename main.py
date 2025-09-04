@@ -62,7 +62,7 @@ def obter_resposta_openai(texto, chat_id=None):
             (como direito civil, penal, trabalhista, tributário, entre outros) e informe essa área de forma explícita na resposta.
             Caso não seja possível definir com segurança a área jurídica, solicite mais detalhes ao cliente antes de tentar indicar.
 
-            Apresente-se no início da sua primeira resposta. Use linguagem simples; construa suas respostas em uma estrutura de até 4 parágrafos; e evite utilizar termos jurídicos rebuscados.
+            Use linguagem simples; construa suas respostas em uma estrutura de até 4 parágrafos; e evite utilizar termos jurídicos rebuscados.
             Quando for necessário usar algum termo técnico, explique-o de forma clara para garantir que qualquer pessoa, mesmo sem formação jurídica, possa entender.
 
             Evite suposições ou invenções. Baseie suas respostas apenas nas informações fornecidas pelo usuário e no seu conhecimento geral.
@@ -81,7 +81,7 @@ def obter_resposta_openai(texto, chat_id=None):
             if chat_id:
                 cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
                 cursor.execute(
-                    "SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em",
+                    "SELECT remetente, conteudo FROM mensagens WHERE chat_id = %s ORDER BY enviada_em LIMIT 6",
                     (chat_id,)
                 )
                 mensagens = cursor.fetchall()
@@ -313,6 +313,7 @@ def api_chat():
         session['chat_id'] = chat_id
 
     resposta_openai = obter_resposta_openai(texto, chat_id)
+    print(resposta_openai)
 
     # Atualiza título se detectar área
     area = identificar_area_juridica(resposta_openai)
@@ -320,9 +321,7 @@ def api_chat():
         cursor.execute("UPDATE chats SET titulo = %s WHERE id = %s", (area, chat_id))
         mysql.connection.commit()
 
-    return jsonify(reply=resposta_openai, chat_id=chat_id)
-
-
+    return jsonify(reply=resposta_openai, chat_id=chat_id, titulo=area or "Nova conversa")
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

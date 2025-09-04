@@ -368,3 +368,23 @@ textarea.form-control {
   color: #ff0000;
 }
 
+.mensagem-inicial {
+  color: #ccc;
+  text-align: center;
+  padding-top: 100px;
+  line-height: 1.6;
+  font-size: 1.2rem;
+  opacity: 0.8;
+}
+
+.mensagem-inicial .linha1,
+.mensagem-inicial .linha2 {
+  font-weight: bold;
+  font-size: 1.4rem;
+}
+
+.mensagem-inicial .linha3 {
+  margin-top: 12px;
+  font-style: italic;
+  font-size: 1.1rem;
+}
