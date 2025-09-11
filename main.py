@@ -1,5 +1,6 @@
 import os
 import time
+import random
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_mysqldb import MySQL
 from dotenv import load_dotenv
@@ -21,21 +22,11 @@ app.config['MYSQL_HOST'] = os.getenv('MYSQL_HOST')
 app.config['MYSQL_USER'] = os.getenv('MYSQL_USER')
 app.config['MYSQL_PASSWORD'] = os.getenv('MYSQL_PASSWORD')
 app.config['MYSQL_DB'] = os.getenv('MYSQL_DB')
+# (Opcional) garantir unicode completo:
+# app.config['MYSQL_CHARSET'] = 'utf8mb4'
+# app.config['MYSQL_USE_UNICODE'] = True
 
 mysql = MySQL(app)
-
-def gerar_csv_advogados():
-    try:
-        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute("SELECT especialidade, nome, telefone, horario_trabalho FROM advogados")
-        dados = cursor.fetchall()
-        linhas = ["Especialidade,Nome,Telefone,Horário de Trabalho"]
-        for row in dados:
-            linhas.append(f"{row['especialidade']},{row['nome']},{row['telefone']},{row['horario_trabalho']}")
-        return "\n".join(linhas)
-    except Exception as e:
-        print("Erro ao gerar CSV:", e)
-        return ""
 
 def identificar_area_juridica(resposta):
     areas = [
@@ -48,33 +39,78 @@ def identificar_area_juridica(resposta):
             return area
     return None
 
+def recomendar_advogado_por_area(area):
+    try:
+        cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+
+        like = f"%{area}%"
+        cursor.execute("""
+            SELECT nome, telefone, horario_trabalho, especialidade
+            FROM advogados
+            WHERE LOWER(especialidade) LIKE LOWER(%s)
+            ORDER BY RAND() LIMIT 1
+        """, (like,))
+        row = cursor.fetchone()
+
+        if not row:
+            mapas = {
+                'Direito do Consumidor': ['Consumidor', 'Defesa do Consumidor'],
+                'Direito Trabalhista': ['Trabalhista', 'Trabalho'],
+                'Direito Civil': ['Civil'],
+                'Direito Penal': ['Penal', 'Criminal'],
+                'Direito de Família': ['Família', 'Familia'],
+                'Direito Previdenciário': ['Previdenciário', 'Previdenciario', 'INSS'],
+                'Direito Tributário': ['Tributário', 'Tributario', 'Fiscal'],
+                'Direito Ambiental': ['Ambiental', 'Meio Ambiente'],
+            }
+            termos = mapas.get(area, [])
+            if termos:
+                like_terms = tuple(f"%{t}%" for t in termos)
+                where = " OR ".join(["LOWER(especialidade) LIKE LOWER(%s)"] * len(termos))
+                cursor.execute(f"""
+                    SELECT nome, telefone, horario_trabalho, especialidade
+                    FROM advogados
+                    WHERE {where}
+                    ORDER BY RAND() LIMIT 1
+                """, like_terms)
+                row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        nome = row['nome']
+        tel = row['telefone']
+        horario = row.get('horario_trabalho') or 'Horário não informado'
+        espec = row.get('especialidade') or area
+
+        cartao = (
+            "*Recomendação de Advogado(a)**\n"
+            f"**Especialidade:** {espec}\n"
+            f"**Nome:** {nome}\n"
+            f"**Telefone:** {tel}\n"
+            f"**Atendimento:** {horario}"
+        )
+        return cartao
+
+    except Exception as e:
+        print("Erro ao recomendar advogado:", e)
+        return None
+
 def obter_resposta_openai(texto, chat_id=None):
     try:
         if 'chat_history' not in session:
             session['chat_history'] = []
 
-            csv_advogados = gerar_csv_advogados()
-            prompt = f"""
+            prompt = """
             Você é uma assistente chamada Lia, especializada em assuntos jurídicos. Seu papel é ajudar os clientes a compreenderem,
-            de forma objetiva e acessível, dúvidas relacionadas a situações jurídicas que tenham enfrentado recentemente.
+            de forma objetiva e acessível, dúvidas relacionadas a situações jurídicas.
 
-            Sempre que possível, identifique claramente qual é a área do direito relacionada ao problema apresentado
-            (como direito civil, penal, trabalhista, tributário, entre outros) e informe essa área de forma explícita na resposta.
-            Caso não seja possível definir com segurança a área jurídica, solicite mais detalhes ao cliente antes de tentar indicar.
-
-            Use linguagem simples; construa suas respostas em uma estrutura de até 4 parágrafos; e evite utilizar termos jurídicos rebuscados.
-            Quando for necessário usar algum termo técnico, explique-o de forma clara para garantir que qualquer pessoa, mesmo sem formação jurídica, possa entender.
-
-            Evite suposições ou invenções. Baseie suas respostas apenas nas informações fornecidas pelo usuário e no seu conhecimento geral.
-            Se faltar informação, peça mais detalhes em vez de presumir ou imaginar contextos.
-
-            Seu tom deve ser acessível e empático, mas sempre profissional. Não ofereça conclusões legais definitivas — seu papel é orientar e esclarecer,
-            não substituir a análise de um advogado.
-
-            Quando for possível identificar a área de atuação do problema, adicionalmente você deve recomendar um advogado com a
-            especialidade relacionada caso exista, montando um "cartão de visitas" com as informações do seguinte CSV:
-
-            {csv_advogados}
+            Regras:
+            - Use linguagem simples e respostas com até 4 parágrafos.
+            - Não ofereça conclusões legais definitivas; oriente e esclareça.
+            - Sempre que possível, identifique explicitamente a área do direito, por exemplo:
+              "Área: Direito do Consumidor" (ou Penal, Civil, Trabalhista, Tributário, Família, Previdenciário, Ambiental).
+            - Caso não seja possível definir com segurança a área jurídica, peça mais detalhes.
             """
 
             # Carrega histórico, se houver
@@ -121,8 +157,6 @@ def obter_resposta_openai(texto, chat_id=None):
         print("Erro OpenAI:", e)
         time.sleep(10)
         return "Desculpe, estou com dificuldades técnicas no momento. Por favor, tente mais tarde."
-
-
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -198,9 +232,6 @@ def chat():
 
     return render_template('chat.html', chats=chats, mensagens=[], chat_id=None)
 
-
-
-
 @app.route('/chat/<int:chat_id>')
 def abrir_chat(chat_id):
     if 'usuario' not in session:
@@ -223,8 +254,6 @@ def abrir_chat(chat_id):
 
     return render_template('chat.html', mensagens=mensagens, chats=chats, chat_id=chat_id)
 
-
-
 @app.route('/chat/novo', methods=['POST'])
 def novo_chat():
     if 'usuario' not in session:
@@ -238,9 +267,10 @@ def novo_chat():
 
     cursor.execute("INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)", (user['id'], titulo))
     mysql.connection.commit()
+    chat_id = cursor.lastrowid  # pega o ID do novo chat
 
-    return redirect(url_for('chat'))
-
+    # Redireciona diretamente para o novo chat
+    return redirect(url_for('abrir_chat', chat_id=chat_id))
 
 @app.route('/delete_chat', methods=['POST'])
 def delete_chat():
@@ -251,12 +281,8 @@ def delete_chat():
         return jsonify({'error': 'ID inválido'}), 400
 
     cur = mysql.connection.cursor()
-
-    # Deleta mensagens associadas
     cur.execute("DELETE FROM mensagens WHERE chat_id = %s", (chat_id,))
-    # Deleta o próprio chat
     cur.execute("DELETE FROM chats WHERE id = %s", (chat_id,))
-
     mysql.connection.commit()
     cur.close()
 
@@ -277,8 +303,6 @@ def edit_chat_title():
     cur.close()
 
     return jsonify({'success': True})
-
-
 
 @app.route('/logout')
 def logout():
@@ -318,10 +342,34 @@ def api_chat():
     # Atualiza título se detectar área
     area = identificar_area_juridica(resposta_openai)
     if area:
-        cursor.execute("UPDATE chats SET titulo = %s WHERE id = %s", (area, chat_id))
-        mysql.connection.commit()
+        try:
+            cursor.execute("UPDATE chats SET titulo = %s WHERE id = %s", (area, chat_id))
+            mysql.connection.commit()
+        except Exception as e:
+            print("Falha ao atualizar título:", e)
 
-    return jsonify(reply=resposta_openai, chat_id=chat_id, titulo=area or "Nova conversa")
+    # Se houver área, busca e grava recomendação como nova mensagem
+    recomendacao_texto = None
+    if area:
+        recomendacao_texto = recomendar_advogado_por_area(area)
+        if recomendacao_texto:
+            try:
+                cursor.execute(
+                    "INSERT INTO mensagens (chat_id, remetente, conteudo) VALUES (%s, %s, %s)",
+                    (chat_id, 'ia', recomendacao_texto)
+                )
+                mysql.connection.commit()
+            except Exception as e:
+                print("Falha ao salvar recomendação:", e)
+                recomendacao_texto = None
+
+    return jsonify(
+        reply=resposta_openai,
+        chat_id=chat_id,
+        titulo=area or "Nova conversa",
+        recommendation=recomendacao_texto
+    )
 
 if __name__ == '__main__':
+    # Em produção, use um servidor WSGI (gunicorn/uwsgi). Este é apenas para desenvolvimento.
     app.run(debug=True, host='0.0.0.0', port=5000)

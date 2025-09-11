@@ -28,23 +28,27 @@ function appendMessage(element) {
 }
 
 function typeWriter(element, text, delay = 20) {
-  let i = 0;
-  if (text.length > 150) {
-    delay -= 15;
-  }
-
-  setTimeout(() => {
-    element.classList.add('visible');
-  }, 100);
-
-  function type() {
-    if (i < text.length) {
-      element.textContent += text.charAt(i);
-      i++;
-      setTimeout(type, delay);
+  return new Promise((resolve) => {
+    let i = 0;
+    if (text && text.length > 150) {
+      delay = Math.max(5, delay - 15);
     }
-  }
-  type();
+
+    setTimeout(() => {
+      element.classList.add('visible');
+    }, 100);
+
+    function type() {
+      if (i < (text || '').length) {
+        element.textContent += text.charAt(i);
+        i++;
+        setTimeout(type, delay);
+      } else {
+        resolve();
+      }
+    }
+    type();
+  });
 }
 
 input.addEventListener('keydown', function (e) {
@@ -82,16 +86,21 @@ form.addEventListener('submit', async function (e) {
   appendMessage(botMsg);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s
+
+  // trava input enquanto "digita"
+  form.querySelector('button[type="submit"]')?.setAttribute('disabled', 'true');
+  input.disabled = true;
 
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({ message: texto, chat_id: CHAT_ID })
     });
 
-    console.log("❌ Erro ao chamar OpenAI:", CHAT_ID)
+    clearTimeout(timeoutId);
 
     if (!resp.ok) {
       throw new Error(`Erro HTTP ${resp.status}`);
@@ -104,10 +113,9 @@ form.addEventListener('submit', async function (e) {
 
     const data = await resp.json();
 
-
+    // Atualiza CHAT_ID e URL sem recarregar
     if (data.chat_id && (CHAT_ID === null || CHAT_ID !== data.chat_id)) {
       CHAT_ID = data.chat_id;
-
       const cleanUrl = `/chat/${CHAT_ID}`.replace(/\/+$/, '').replace(/\?$/, '');
       window.history.replaceState({}, '', cleanUrl);
     }
@@ -117,20 +125,31 @@ form.addEventListener('submit', async function (e) {
       addChatToSidebar(CHAT_ID, data.titulo || "Nova conversa");
     }
 
-    window.location.href = `/chat/${CHAT_ID}`;
+    // Digita a resposta da Lia
+    if (data.reply) {
+      await typeWriter(botMsg, data.reply, 20);
+    } else {
+      botMsg.textContent = 'Sem resposta.';
+    }
 
-    console.log("❌ Erro ao chamar OpenAI:", CHAT_ID)
-    console.log("❌ Erro ao chamar OpenAI:", texto)
-
+    // Só depois começa a digitar a recomendação
+    if (data.recommendation) {
+      const recMsg = document.createElement('div');
+      recMsg.className = 'message bot';
+      appendMessage(recMsg);
+      await typeWriter(recMsg, data.recommendation, 20);
+    }
 
   } catch (err) {
-      console.error('Erro ao buscar resposta:', err);
-      typeWriter(botMsg, 'Desculpe, ocorreu um erro ao obter resposta.', 20);
+    console.error('Erro ao buscar resposta:', err);
+    botMsg.textContent = 'Desculpe, ocorreu um erro ao obter resposta.';
+  } finally {
+    form.querySelector('button[type="submit"]')?.removeAttribute('disabled');
+    input.disabled = false;
+    input.focus();
+    scrollToBottom();
   }
-
-  scrollToBottom();
 });
-
 
 chatBox.addEventListener('scroll', toggleScrollButton);
 
@@ -239,7 +258,6 @@ function addChatToSidebar(chatId, titulo) {
 
   sidebar.insertBefore(wrapper, sidebar.querySelector('form'));
 
-  // Reanexa listeners
   attachChatEventListeners(wrapper);
 }
 
