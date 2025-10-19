@@ -28,7 +28,7 @@
             </div>
             {% endfor %}
         {% else %}
-          <p style="color: white; margin-left: 10px;">Nenhum chat encontrado.</p>
+            <p id="no-chats-msg" style="color: white; margin-left: 10px;">Nenhum chat encontrado.</p>
         {% endif %}
       <form action="{{ url_for('novo_chat') }}" method="post" class="d-flex flex-column">
         <input type="text" name="titulo" placeholder="Título do novo chat" class="form-control mb-2" required>
@@ -39,6 +39,14 @@
     <!-- Chat principal -->
     <div class="chat-main">
         <div class="chat-box" id="chat-box">
+          {% if not mensagens %}
+            <div id="mensagem-boas-vindas" class="mensagem-inicial">
+              <p class="linha1">Olá, eu sou a Lia.</p>
+              <p class="linha2">Sua assistente jurídica pessoal!</p>
+              <p class="linha3">Como posso te ajudar hoje?</p>
+            </div>
+          {% endif %}
+
           {% for msg in mensagens %}
           {% set remetente = msg.remetente.strip().lower() %}
           {% if remetente == 'usuario' %}
@@ -72,16 +80,12 @@
     </div>
   </div>
 
-  {% if chat_id is defined %}
-    <script>
-      const CHAT_ID = {{ chat_id | tojson }};
-    </script>
-  {% else %}
-    <script>
-      const CHAT_ID = null;
-    </script>
-  {% endif %}
-  
+    {% if chat_id is defined %}
+      <script> window.CHAT_ID = {{ chat_id | tojson }}; </script>
+    {% else %}
+      <script> window.CHAT_ID = null; </script>
+    {% endif %}
+
   <script src="{{ url_for('static', filename='script/chat.js') }}"></script>
 </body>
 </html>
