@@ -1,6 +1,5 @@
 import os
 import time
-import random
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_mysqldb import MySQL
 from dotenv import load_dotenv
@@ -43,13 +42,32 @@ def recomendar_advogado_por_area(area):
     try:
         cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
 
+        cidade_usuario = None
+        if 'usuario' in session:
+            cursor.execute("""
+                SELECT Cidade
+                FROM usuarios
+                WHERE usuario = %s
+                LIMIT 1
+            """, (session['usuario'],))
+            u = cursor.fetchone()
+            if u and u.get('Cidade'):
+                cidade_usuario = u['Cidade']
+
         like = f"%{area}%"
-        cursor.execute("""
-            SELECT nome, telefone, horario_trabalho, especialidade
+        params_base = [like]
+
+        where_especialidade = "LOWER(especialidade) LIKE LOWER(%s)"
+        where_cidade = " AND LOWER(Cidade) = LOWER(%s)" if cidade_usuario else ""
+        params = params_base + ([cidade_usuario] if cidade_usuario else [])
+
+        cursor.execute(f"""
+            SELECT nome, telefone, horario_trabalho, especialidade, Cidade
             FROM advogados
-            WHERE LOWER(especialidade) LIKE LOWER(%s)
-            ORDER BY RAND() LIMIT 1
-        """, (like,))
+            WHERE {where_especialidade}{where_cidade}
+            ORDER BY RAND()
+            LIMIT 1
+        """, tuple(params))
         row = cursor.fetchone()
 
         if not row:
@@ -64,16 +82,41 @@ def recomendar_advogado_por_area(area):
                 'Direito Ambiental': ['Ambiental', 'Meio Ambiente'],
             }
             termos = mapas.get(area, [])
+
             if termos:
-                like_terms = tuple(f"%{t}%" for t in termos)
-                where = " OR ".join(["LOWER(especialidade) LIKE LOWER(%s)"] * len(termos))
-                cursor.execute(f"""
-                    SELECT nome, telefone, horario_trabalho, especialidade
-                    FROM advogados
-                    WHERE {where}
-                    ORDER BY RAND() LIMIT 1
-                """, like_terms)
-                row = cursor.fetchone()
+                like_terms = [f"%{t}%" for t in termos]
+
+                if cidade_usuario:
+                    where_syn = " OR ".join(["LOWER(especialidade) LIKE LOWER(%s)"] * len(termos))
+                    cursor.execute(f"""
+                        SELECT nome, telefone, horario_trabalho, especialidade, Cidade
+                        FROM advogados
+                        WHERE ({where_syn}) AND LOWER(Cidade) = LOWER(%s)
+                        ORDER BY RAND()
+                        LIMIT 1
+                    """, tuple(like_terms + [cidade_usuario]))
+                    row = cursor.fetchone()
+
+                if not row:
+                    where_syn = " OR ".join(["LOWER(especialidade) LIKE LOWER(%s)"] * len(termos))
+                    cursor.execute(f"""
+                        SELECT nome, telefone, horario_trabalho, especialidade, Cidade
+                        FROM advogados
+                        WHERE {where_syn}
+                        ORDER BY RAND()
+                        LIMIT 1
+                    """, tuple(like_terms))
+                    row = cursor.fetchone()
+
+        if not row:
+            cursor.execute("""
+                SELECT nome, telefone, horario_trabalho, especialidade, Cidade
+                FROM advogados
+                WHERE LOWER(especialidade) LIKE LOWER(%s)
+                ORDER BY RAND()
+                LIMIT 1
+            """, (like,))
+            row = cursor.fetchone()
 
         if not row:
             return None
@@ -82,10 +125,12 @@ def recomendar_advogado_por_area(area):
         tel = row['telefone']
         horario = row.get('horario_trabalho') or 'Horário não informado'
         espec = row.get('especialidade') or area
+        cidade_adv = row.get('Cidade') or 'Cidade não informada'
 
         cartao = (
-            "*Recomendação de Advogado(a)**\n"
+            "**Recomendação de Advogado(a)**\n"
             f"**Especialidade:** {espec}\n"
+            f"**Cidade:** {cidade_adv}\n"
             f"**Nome:** {nome}\n"
             f"**Telefone:** {tel}\n"
             f"**Atendimento:** {horario}"
@@ -95,6 +140,7 @@ def recomendar_advogado_por_area(area):
     except Exception as e:
         print("Erro ao recomendar advogado:", e)
         return None
+
 
 def obter_resposta_openai(texto, chat_id=None):
     try:
@@ -108,8 +154,7 @@ def obter_resposta_openai(texto, chat_id=None):
             Regras:
             - Use linguagem simples e respostas com até 4 parágrafos.
             - Não ofereça conclusões legais definitivas; oriente e esclareça.
-            - Sempre que possível, identifique explicitamente a área do direito, por exemplo:
-              "Área: Direito do Consumidor" (ou Penal, Civil, Trabalhista, Tributário, Família, Previdenciário, Ambiental).
+            - Sempre que possível, identifique explicitamente a área do direito.
             - Caso não seja possível definir com segurança a área jurídica, peça mais detalhes.
             """
 
@@ -189,6 +234,7 @@ def cadastro():
         telefone  = request.form['telefone']
         senha     = request.form['senha']
         confirmar = request.form['Confirmar Senha']
+        cidade = request.form['cidade']
 
         if senha != confirmar:
             msg = 'As senhas não coincidem!'
@@ -208,8 +254,8 @@ def cadastro():
                 msg = 'Nome de usuário já está em uso!'
             else:
                 cursor.execute(
-                    'INSERT INTO usuarios (nome, usuario, email, telefone, senha) VALUES (%s, %s, %s, %s, %s)',
-                    (nome, usuario, email, telefone, senha_hash)
+                    'INSERT INTO usuarios (nome, usuario, email, telefone, senha, cidade) VALUES (%s, %s, %s, %s, %s, %s)',
+                    (nome, usuario, email, telefone, senha_hash, cidade)
                 )
                 mysql.connection.commit()
                 return redirect(url_for('login'))
